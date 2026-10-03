@@ -1,0 +1,8 @@
+{
+  "name": "UNO Live - Real-Time Multiplayer Card Game",
+  "description": "Play UNO online with friends in real-time with custom rooms, animated gameplay, classic & custom rules, and instant cross-device multiplayer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
