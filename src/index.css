@@ -1,1 +1,51 @@
 @import "tailwindcss";
+
+@layer utilities {
+  /* Hide scrollbar for Chrome, Safari and Opera */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  /* Hide scrollbar for IE, Edge and Firefox */
+  .no-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+}
+
+@keyframes flyToDiscard {
+  0% {
+    transform: translateY(220px) scale(0.7) rotate(-12deg);
+    opacity: 0.8;
+  }
+  70% {
+    transform: translateY(-15px) scale(1.08) rotate(6deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0px) scale(1) rotate(2deg);
+    opacity: 1;
+  }
+}
+
+@keyframes flyFromDeck {
+  0% {
+    transform: translateY(-60px) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  40% {
+    transform: translateY(40px) scale(1.05) rotate(8deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(200px) scale(0.75) rotate(-10deg);
+    opacity: 0;
+  }
+}
+
+.animate-fly-to-discard {
+  animation: flyToDiscard 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fly-from-deck {
+  animation: flyFromDeck 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

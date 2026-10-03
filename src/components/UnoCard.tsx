@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, PlayableColor } from '../../shared/types';
-import { Ban, RefreshCw, Layers } from 'lucide-react';
+import { Ban, RefreshCw, Sparkles, Layers } from 'lucide-react';
 
 interface UnoCardProps {
   card?: Card;
@@ -8,9 +8,11 @@ interface UnoCardProps {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   isPlayable?: boolean;
   isSelected?: boolean;
+  isHovered?: boolean;
   onClick?: () => void;
   className?: string;
   badgeText?: string;
+  rotation?: number; // Tilt angle in degrees for natural hand fanning
 }
 
 export const UnoCard: React.FC<UnoCardProps> = ({
@@ -19,37 +21,66 @@ export const UnoCard: React.FC<UnoCardProps> = ({
   size = 'md',
   isPlayable = false,
   isSelected = false,
+  isHovered = false,
   onClick,
   className = '',
   badgeText,
+  rotation = 0,
 }) => {
-  // Dimensions per size
+  // Sizing matrix with exact aspect ratios (approx 2:3)
   const sizeClasses = {
-    xs: 'w-8 h-12 text-[10px] rounded-sm shadow-xs',
-    sm: 'w-12 h-18 text-xs rounded-md shadow-sm',
-    md: 'w-18 h-26 sm:w-20 sm:h-30 text-sm rounded-lg shadow-md',
-    lg: 'w-24 h-36 sm:w-28 sm:h-42 text-base rounded-xl shadow-lg',
-    xl: 'w-32 h-48 sm:w-36 sm:h-54 text-lg rounded-2xl shadow-xl',
+    xs: 'w-9 h-13 text-[10px] rounded-lg shadow-sm',
+    sm: 'w-13 h-19 text-xs rounded-xl shadow-md',
+    md: 'w-20 h-30 sm:w-22 sm:h-33 text-sm rounded-2xl shadow-xl',
+    lg: 'w-28 h-42 sm:w-32 sm:h-48 text-base rounded-2xl shadow-2xl',
+    xl: 'w-36 h-54 sm:w-40 sm:h-60 text-lg rounded-3xl shadow-2xl',
   }[size];
 
+  // CARD BACK (Textured authentic UNO back with 3D embossed logo)
   if (isBack || !card) {
     return (
       <div
         onClick={onClick}
-        className={`relative select-none flex flex-col items-center justify-center bg-slate-900 border-2 border-amber-400/80 shadow-2xl transition-all duration-200 ${sizeClasses} ${className} ${
-          onClick ? 'cursor-pointer hover:-translate-y-1 hover:border-amber-300' : ''
+        className={`relative select-none flex flex-col items-center justify-center border-2 border-amber-400/90 overflow-hidden transition-all duration-300 transform-gpu ${sizeClasses} ${className} ${
+          onClick ? 'cursor-pointer hover:scale-105 hover:border-amber-300 hover:shadow-amber-400/30 active:scale-95' : ''
         }`}
         style={{
-          background: 'linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%)',
+          transform: rotation ? `rotate(${rotation}deg)` : undefined,
+          background: 'radial-gradient(ellipse at 30% 20%, #1e1b4b 0%, #0f172a 60%, #020617 100%)',
+          boxShadow: '0 10px 25px -3px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
         }}
       >
-        <div className="w-[82%] h-[82%] rounded-full bg-red-600 flex items-center justify-center rotate-[-25deg] shadow-inner border border-red-400">
-          <span className="font-extrabold text-amber-300 tracking-tight drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] text-center text-xs sm:text-sm font-['Fredoka']">
+        {/* Card gloss sheen reflection */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-transparent pointer-events-none" />
+
+        {/* Outer border trim */}
+        <div className="absolute inset-1 rounded-[inherit] border border-amber-500/30 pointer-events-none" />
+
+        {/* Center tilted red flame oval */}
+        <div
+          className="w-[82%] h-[78%] rounded-[50%] bg-gradient-to-br from-red-500 via-red-600 to-red-800 flex items-center justify-center rotate-[-26deg] shadow-lg border-2 border-amber-300/80 overflow-hidden relative"
+          style={{
+            boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -3px 6px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.5)',
+          }}
+        >
+          {/* Inner oval shine */}
+          <div className="absolute top-1 left-2 w-12 h-6 bg-white/20 rounded-full blur-[2px] pointer-events-none" />
+
+          {/* 3D Extruded UNO Logo */}
+          <span
+            className="font-black text-amber-300 tracking-tighter text-center font-['Fredoka'] select-none transform rotate-[4deg]"
+            style={{
+              fontSize: size === 'xs' ? '12px' : size === 'sm' ? '16px' : size === 'md' ? '24px' : size === 'lg' ? '38px' : '48px',
+              textShadow: '0 2px 0 #b45309, 0 4px 0 #78350f, 0 6px 4px rgba(0,0,0,0.9), 0 0 10px rgba(251,191,36,0.6)',
+              WebkitTextStroke: size === 'xs' ? '0.5px #000' : '1.5px #000',
+            }}
+          >
             UNO
           </span>
         </div>
+
         {badgeText && (
-          <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow">
+          <div className="absolute -top-2 -right-2 bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-amber-200">
             {badgeText}
           </div>
         )}
@@ -57,59 +88,141 @@ export const UnoCard: React.FC<UnoCardProps> = ({
     );
   }
 
-  // Color palette
-  const colorBgMap: Record<string, string> = {
-    red: 'from-red-500 via-red-600 to-red-700 border-red-300 text-red-600',
-    blue: 'from-sky-500 via-blue-600 to-blue-700 border-sky-300 text-blue-600',
-    green: 'from-emerald-500 via-green-600 to-green-700 border-emerald-300 text-green-600',
-    yellow: 'from-amber-400 via-yellow-500 to-amber-600 border-yellow-200 text-amber-600',
-    wild: 'from-slate-900 via-slate-800 to-black border-purple-400 text-purple-400',
+  // CARD FRONT: Rich dynamic gradients and authentic design
+  const colorStyles: Record<
+    string,
+    {
+      bgGradient: string;
+      border: string;
+      glow: string;
+      textColor: string;
+      accentBg: string;
+    }
+  > = {
+    red: {
+      bgGradient: 'bg-gradient-to-br from-red-500 via-rose-600 to-red-800',
+      border: 'border-red-300/70',
+      glow: 'shadow-[0_0_25px_rgba(244,63,94,0.6)] ring-amber-300',
+      textColor: 'text-red-600',
+      accentBg: 'bg-red-600',
+    },
+    blue: {
+      bgGradient: 'bg-gradient-to-br from-sky-400 via-blue-600 to-indigo-800',
+      border: 'border-sky-300/70',
+      glow: 'shadow-[0_0_25px_rgba(56,189,248,0.6)] ring-amber-300',
+      textColor: 'text-blue-600',
+      accentBg: 'bg-blue-600',
+    },
+    green: {
+      bgGradient: 'bg-gradient-to-br from-emerald-400 via-green-600 to-emerald-900',
+      border: 'border-emerald-300/70',
+      glow: 'shadow-[0_0_25px_rgba(52,211,153,0.6)] ring-amber-300',
+      textColor: 'text-emerald-600',
+      accentBg: 'bg-emerald-600',
+    },
+    yellow: {
+      bgGradient: 'bg-gradient-to-br from-amber-300 via-yellow-500 to-amber-700',
+      border: 'border-yellow-200/90',
+      glow: 'shadow-[0_0_25px_rgba(251,191,36,0.65)] ring-white',
+      textColor: 'text-amber-600',
+      accentBg: 'bg-amber-500',
+    },
+    wild: {
+      bgGradient: 'bg-gradient-to-br from-slate-900 via-purple-950 to-slate-950',
+      border: 'border-purple-400/80',
+      glow: 'shadow-[0_0_30px_rgba(168,85,247,0.7)] ring-purple-300',
+      textColor: 'text-purple-600',
+      accentBg: 'bg-purple-600',
+    },
   };
 
-  const bgGradient = colorBgMap[card.color] || colorBgMap.wild;
+  const style = colorStyles[card.color] || colorStyles.wild;
 
-  // Render symbol
+  // Render symbol (number or action icon)
   const renderSymbol = (isSmall = false) => {
     switch (card.value) {
       case 'skip':
-        return <Ban className={isSmall ? 'w-2.5 h-2.5' : 'w-6 h-6 sm:w-8 sm:h-8 stroke-[2.8]'} />;
+        return (
+          <div className="relative flex items-center justify-center">
+            <Ban
+              className={`${
+                isSmall ? 'w-3 h-3 stroke-[3]' : 'w-8 h-8 sm:w-11 sm:h-11 stroke-[3.2]'
+              } drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)]`}
+            />
+          </div>
+        );
       case 'reverse':
-        return <RefreshCw className={isSmall ? 'w-2.5 h-2.5' : 'w-6 h-6 sm:w-8 sm:h-8 stroke-[2.8]'} />;
+        return (
+          <div className="relative flex items-center justify-center">
+            <RefreshCw
+              className={`${
+                isSmall ? 'w-3 h-3 stroke-[3]' : 'w-8 h-8 sm:w-11 sm:h-11 stroke-[3.2]'
+              } drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)]`}
+            />
+          </div>
+        );
       case 'draw2':
         return (
-          <div className="flex items-center justify-center font-black">
-            <span>+2</span>
+          <div className="flex flex-col items-center justify-center font-black font-['Fredoka']">
+            <span
+              className={`${
+                isSmall ? 'text-[11px]' : 'text-2xl sm:text-4xl'
+              } drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)]`}
+            >
+              +2
+            </span>
           </div>
         );
       case 'wild':
         return (
-          <div className={`relative ${isSmall ? 'w-3 h-3' : 'w-8 h-8 sm:w-10 sm:h-10'} rounded-full overflow-hidden flex flex-wrap border border-white/60 shadow-inner`}>
-            <div className="w-1/2 h-1/2 bg-red-500" />
-            <div className="w-1/2 h-1/2 bg-blue-500" />
-            <div className="w-1/2 h-1/2 bg-yellow-400" />
-            <div className="w-1/2 h-1/2 bg-emerald-500" />
+          <div
+            className={`relative ${
+              isSmall ? 'w-3.5 h-3.5' : 'w-10 h-10 sm:w-14 sm:h-14'
+            } rounded-full overflow-hidden flex flex-wrap border-2 border-white shadow-xl`}
+          >
+            <div className="w-1/2 h-1/2 bg-red-500 shadow-inner" />
+            <div className="w-1/2 h-1/2 bg-sky-500 shadow-inner" />
+            <div className="w-1/2 h-1/2 bg-amber-400 shadow-inner" />
+            <div className="w-1/2 h-1/2 bg-emerald-500 shadow-inner" />
+            <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/30 to-transparent pointer-events-none" />
+            <div className="absolute inset-1/4 rounded-full bg-slate-900/40 blur-[1px] pointer-events-none" />
           </div>
         );
       case 'wild_draw4':
         return (
           <div className="flex flex-col items-center justify-center">
-            <span className={`font-black text-amber-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${isSmall ? 'text-[9px]' : 'text-base sm:text-xl'}`}>
+            <span
+              className={`font-black font-['Fredoka'] text-amber-300 drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] ${
+                isSmall ? 'text-[11px]' : 'text-2xl sm:text-4xl'
+              }`}
+              style={{
+                textShadow: '0 2px 4px rgba(0,0,0,0.9), 0 0 10px rgba(251,191,36,0.8)',
+                WebkitTextStroke: isSmall ? '0.5px #000' : '1px #000',
+              }}
+            >
               +4
             </span>
             {!isSmall && (
-              <div className="flex gap-0.5 mt-0.5">
-                <span className="w-2 h-3 bg-red-500 rounded-[1px] border border-white/40" />
-                <span className="w-2 h-3 bg-blue-500 rounded-[1px] border border-white/40 -ml-1" />
-                <span className="w-2 h-3 bg-yellow-400 rounded-[1px] border border-white/40 -ml-1" />
-                <span className="w-2 h-3 bg-green-500 rounded-[1px] border border-white/40 -ml-1" />
+              <div className="flex -space-x-1.5 mt-0.5">
+                <span className="w-2.5 h-4 bg-red-500 rounded-xs border border-white shadow-md transform -rotate-12" />
+                <span className="w-2.5 h-4 bg-sky-500 rounded-xs border border-white shadow-md transform -rotate-4" />
+                <span className="w-2.5 h-4 bg-amber-400 rounded-xs border border-white shadow-md transform rotate-6" />
+                <span className="w-2.5 h-4 bg-emerald-500 rounded-xs border border-white shadow-md transform rotate-14" />
               </div>
             )}
           </div>
         );
       default:
-        // Number 0-9
+        // Number 0-9 with custom high-contrast typography and subtle drop-shadow
         return (
-          <span className={`font-black font-['Outfit'] tracking-tighter ${isSmall ? 'text-[11px]' : 'text-2xl sm:text-4xl'}`}>
+          <span
+            className={`font-black font-['Fredoka'] tracking-tight ${
+              isSmall ? 'text-[13px] leading-none' : 'text-3xl sm:text-5xl leading-none'
+            }`}
+            style={{
+              textShadow: '0 2px 4px rgba(0,0,0,0.3)',
+            }}
+          >
             {card.value}
           </span>
         );
@@ -119,37 +232,63 @@ export const UnoCard: React.FC<UnoCardProps> = ({
   return (
     <div
       onClick={isPlayable && onClick ? onClick : undefined}
-      className={`relative select-none flex flex-col justify-between p-1 sm:p-1.5 border-2 bg-gradient-to-br shadow-lg transition-all duration-200 ${bgGradient} ${sizeClasses} ${className} ${
+      className={`relative select-none flex flex-col justify-between p-1.5 sm:p-2 border-2 overflow-hidden transition-all duration-300 transform-gpu ${sizeClasses} ${style.bgGradient} ${style.border} ${className} ${
         isPlayable
-          ? 'cursor-pointer ring-2 sm:ring-4 ring-amber-400/90 shadow-[0_0_20px_rgba(251,191,36,0.6)] hover:-translate-y-3 hover:scale-105 active:scale-95 z-10'
+          ? `cursor-pointer ring-3 sm:ring-4 ${style.glow} hover:-translate-y-4 hover:scale-110 active:scale-95 z-20`
           : onClick
           ? 'opacity-85'
-          : 'opacity-90'
-      } ${isSelected ? '-translate-y-3 ring-4 ring-emerald-400 shadow-2xl' : ''}`}
+          : 'opacity-95'
+      } ${isSelected ? '-translate-y-5 scale-110 ring-4 ring-emerald-400 shadow-2xl z-30' : ''} ${
+        isHovered ? '-translate-y-4 scale-108 z-25' : ''
+      }`}
       style={{
-        boxShadow: isPlayable ? '0 8px 24px -2px rgba(245, 158, 11, 0.45)' : undefined,
+        transform: rotation ? `rotate(${rotation}deg)` : undefined,
+        boxShadow: isPlayable
+          ? '0 12px 28px -2px rgba(0, 0, 0, 0.5), 0 0 15px rgba(251, 191, 36, 0.45)'
+          : '0 6px 16px -2px rgba(0, 0, 0, 0.4)',
       }}
     >
-      {/* Top Left corner index */}
-      <div className="self-start flex flex-col items-center leading-none text-white font-black drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">
+      {/* Specular metallic sheen overlay */}
+      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/18 to-transparent pointer-events-none" />
+
+      {/* Subtle border inset highlight */}
+      <div className="absolute inset-0.5 rounded-[inherit] border border-white/20 pointer-events-none" />
+
+      {/* Top Left Corner Index */}
+      <div className="self-start flex flex-col items-center leading-none text-white font-black drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] z-10">
         {renderSymbol(true)}
       </div>
 
-      {/* Center Angled Oval */}
-      <div className="absolute inset-x-2 sm:inset-x-3 inset-y-4 sm:inset-y-5 rounded-[50%] bg-white/95 flex items-center justify-center rotate-[-22deg] shadow-inner overflow-hidden border border-white/80">
-        <div className="rotate-[22deg] flex items-center justify-center text-slate-900 drop-shadow-[0_1px_1px_rgba(255,255,255,0.8)]">
+      {/* Signature Center Angled Oval (The iconic UNO look) */}
+      <div
+        className="absolute inset-x-2 sm:inset-x-3 inset-y-4 sm:inset-y-5 rounded-[50%] bg-gradient-to-b from-white via-slate-50 to-slate-100 flex items-center justify-center rotate-[-24deg] shadow-lg overflow-hidden border border-white/90 z-5"
+        style={{
+          boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.15), 0 3px 8px rgba(0,0,0,0.3)',
+        }}
+      >
+        {/* Subtle inner oval bevel shine */}
+        <div className="absolute top-1 left-2 w-10 h-5 bg-white/60 rounded-full blur-[1px] pointer-events-none" />
+
+        {/* Counter-rotate symbol so it stands upright with 3D drop-shadow */}
+        <div
+          className={`rotate-[24deg] flex items-center justify-center font-black ${
+            card.color === 'wild' ? 'text-slate-900' : style.textColor
+          }`}
+        >
           {renderSymbol(false)}
         </div>
       </div>
 
-      {/* Bottom Right inverted corner index */}
-      <div className="self-end rotate-180 flex flex-col items-center leading-none text-white font-black drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">
+      {/* Bottom Right Inverted Corner Index */}
+      <div className="self-end flex flex-col items-center leading-none text-white font-black drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] rotate-180 z-10">
         {renderSymbol(true)}
       </div>
 
-      {/* Playable indicator dot */}
+      {/* Playable Neon Beacon / Play Indicator */}
       {isPlayable && (
-        <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-amber-400 rounded-full border-2 border-white animate-pulse" />
+        <div className="absolute -top-1.5 -right-1.5 bg-gradient-to-r from-amber-400 to-yellow-300 text-slate-950 p-1 rounded-full shadow-lg border border-white animate-pulse z-20">
+          <Sparkles className="w-2.5 h-2.5 fill-slate-950" />
+        </div>
       )}
     </div>
   );

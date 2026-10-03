@@ -381,7 +381,8 @@ export function useUnoPeer() {
 
       case 'DRAW_CARD': {
         const pid = (conn as any).playerId;
-        executeDrawCard(pid);
+        const drawAll = Boolean(data.payload?.drawAll);
+        executeDrawCard(pid, drawAll);
         break;
       }
 
@@ -522,7 +523,7 @@ export function useUnoPeer() {
   };
 
   // Host executes card draw
-  const executeDrawCard = (playerId: string) => {
+  const executeDrawCard = (playerId: string, drawAllRemaining = false) => {
     const state = internalGameStateRef.current;
     if (!state || state.status !== 'playing') return;
 
@@ -534,7 +535,9 @@ export function useUnoPeer() {
 
     if (deckRef.current.length === 0) return;
 
-    const count = state.pendingDrawCount > 0 ? state.pendingDrawCount : 1;
+    const isPenalty = state.pendingDrawCount > 0;
+    // When in penalty, if drawAllRemaining is false, draw 1 card so the player can take cards by their own!
+    const count = isPenalty ? (drawAllRemaining ? state.pendingDrawCount : 1) : 1;
     const hand = playerHandsRef.current.get(playerId) || [];
     const drawn = deckRef.current.splice(0, Math.min(count, deckRef.current.length));
     hand.push(...drawn);
@@ -547,28 +550,45 @@ export function useUnoPeer() {
     }
 
     state.deckCount = deckRef.current.length;
-    const isPenalty = state.pendingDrawCount > 0;
-    state.pendingDrawCount = 0;
 
     if (isPenalty) {
-      const active = state.players.filter((p) => !p.isSpectator);
-      const curIdx = active.findIndex((p) => p.id === playerId);
-      let nextIdx = curIdx + state.direction;
-      while (nextIdx < 0) nextIdx += active.length;
-      state.currentTurnPlayerId = active[nextIdx % active.length].id;
-    }
+      state.pendingDrawCount = Math.max(0, state.pendingDrawCount - drawn.length);
+      const isFinished = state.pendingDrawCount === 0;
 
-    state.lastAction = {
-      id: `act_${Date.now()}`,
-      type: isPenalty ? 'PENALTY_DRAW' : 'DRAW_CARD',
-      playerId,
-      playerName: player?.name || 'Player',
-      message: `${player?.name || 'Player'} drew ${drawn.length} card(s).`,
-      timestamp: Date.now(),
-    };
+      state.lastAction = {
+        id: `act_${Date.now()}`,
+        type: 'PENALTY_DRAW',
+        playerId,
+        playerName: player?.name || 'Player',
+        message: isFinished
+          ? `${player?.name || 'Player'} took the final penalty card. Turn passed!`
+          : `${player?.name || 'Player'} took a penalty card (${state.pendingDrawCount} left to draw).`,
+        timestamp: Date.now(),
+      };
 
-    if (playerId === myPlayerId && !isPenalty) {
-      hasDrawnThisTurnRef.current = true;
+      if (isFinished) {
+        const active = state.players.filter((p) => !p.isSpectator);
+        const curIdx = active.findIndex((p) => p.id === playerId);
+        let nextIdx = curIdx + state.direction;
+        while (nextIdx < 0) nextIdx += active.length;
+        state.currentTurnPlayerId = active[nextIdx % active.length].id;
+        state.turnExpiresAt =
+          state.settings.turnTimerSeconds > 0 ? Date.now() + state.settings.turnTimerSeconds * 1000 : null;
+        hasDrawnThisTurnRef.current = false;
+      }
+    } else {
+      state.lastAction = {
+        id: `act_${Date.now()}`,
+        type: 'DRAW_CARD',
+        playerId,
+        playerName: player?.name || 'Player',
+        message: `${player?.name || 'Player'} drew a card from the deck.`,
+        timestamp: Date.now(),
+      };
+
+      if (playerId === myPlayerId) {
+        hasDrawnThisTurnRef.current = true;
+      }
     }
 
     syncAll();
@@ -875,13 +895,16 @@ export function useUnoPeer() {
     [pendingWildCard, playCard]
   );
 
-  const drawCard = useCallback(() => {
-    if (isHostRef.current) {
-      executeDrawCard(myPlayerId);
-    } else {
-      hostConnRef.current?.send({ type: 'DRAW_CARD' });
-    }
-  }, [myPlayerId]);
+  const drawCard = useCallback(
+    (drawAll = false) => {
+      if (isHostRef.current) {
+        executeDrawCard(myPlayerId, drawAll);
+      } else {
+        hostConnRef.current?.send({ type: 'DRAW_CARD', payload: { drawAll } });
+      }
+    },
+    [myPlayerId]
+  );
 
   const passTurn = useCallback(() => {
     if (isHostRef.current) {
