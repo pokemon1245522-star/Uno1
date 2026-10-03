@@ -11,6 +11,7 @@ interface LobbyProps {
   onKickPlayer: (targetId: string) => void;
   onLeaveRoom: () => void;
   onOpenSettings: () => void;
+  onUpdateSettings?: (newSettings: Partial<GameRules>) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -21,6 +22,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   onKickPlayer,
   onLeaveRoom,
   onOpenSettings,
+  onUpdateSettings,
 }) => {
   const [copied, setCopied] = useState(false);
   const me = gameState.players.find((p) => p.id === myPlayerId);
@@ -187,6 +189,128 @@ export const Lobby: React.FC<LobbyProps> = ({
                 <span>Waiting for friend to join...</span>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Room Rules & Configuration Panel */}
+        <div className="w-full bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-2xl backdrop-blur-md mb-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-amber-400" />
+              <h3 className="font-bold text-white font-['Outfit'] text-sm">
+                Room Rules & Settings {isHost ? '(Host Controls)' : ''}
+              </h3>
+            </div>
+            {isHost && (
+              <span className="text-[11px] text-amber-300 font-semibold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30">
+                You can edit these
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            {/* Starting Cards */}
+            <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-300 font-medium">Starting Cards:</span>
+              {isHost && onUpdateSettings ? (
+                <select
+                  value={gameState.settings.startingCards}
+                  onChange={(e) => onUpdateSettings({ startingCards: parseInt(e.target.value) })}
+                  className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white font-bold cursor-pointer"
+                >
+                  <option value={3}>3 Cards</option>
+                  <option value={5}>5 Cards</option>
+                  <option value={7}>7 Cards (Standard)</option>
+                  <option value={10}>10 Cards</option>
+                </select>
+              ) : (
+                <span className="font-bold text-amber-300">{gameState.settings.startingCards} Cards</span>
+              )}
+            </div>
+
+            {/* Turn Timer */}
+            <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-300 font-medium">Turn Timer:</span>
+              {isHost && onUpdateSettings ? (
+                <select
+                  value={gameState.settings.turnTimerSeconds}
+                  onChange={(e) => onUpdateSettings({ turnTimerSeconds: parseInt(e.target.value) })}
+                  className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white font-bold cursor-pointer"
+                >
+                  <option value={15}>15 Seconds</option>
+                  <option value={20}>20 Seconds</option>
+                  <option value={30}>30 Seconds</option>
+                  <option value={0}>No Timer</option>
+                </select>
+              ) : (
+                <span className="font-bold text-amber-300">
+                  {gameState.settings.turnTimerSeconds > 0 ? `${gameState.settings.turnTimerSeconds}s` : 'Off'}
+                </span>
+              )}
+            </div>
+
+            {/* Max Players */}
+            <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-300 font-medium">Max Players:</span>
+              {isHost && onUpdateSettings ? (
+                <select
+                  value={gameState.settings.maxPlayers}
+                  onChange={(e) => onUpdateSettings({ maxPlayers: parseInt(e.target.value) })}
+                  className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white font-bold cursor-pointer"
+                >
+                  {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+                    <option key={n} value={n}>{n} Players</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="font-bold text-amber-300">{gameState.settings.maxPlayers} Players</span>
+              )}
+            </div>
+
+            {/* Stacking Draw */}
+            <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-300 font-medium">Stacking (+2 on +2):</span>
+              {isHost && onUpdateSettings ? (
+                <input
+                  type="checkbox"
+                  checked={gameState.settings.stackingDraw}
+                  onChange={(e) => onUpdateSettings({ stackingDraw: e.target.checked })}
+                  className="w-4 h-4 accent-amber-500 cursor-pointer"
+                />
+              ) : (
+                <span className="font-bold text-emerald-400">{gameState.settings.stackingDraw ? 'Enabled' : 'Off'}</span>
+              )}
+            </div>
+
+            {/* Jump In */}
+            <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-300 font-medium">Jump-In Rule:</span>
+              {isHost && onUpdateSettings ? (
+                <input
+                  type="checkbox"
+                  checked={gameState.settings.jumpIn}
+                  onChange={(e) => onUpdateSettings({ jumpIn: e.target.checked })}
+                  className="w-4 h-4 accent-amber-500 cursor-pointer"
+                />
+              ) : (
+                <span className="font-bold text-slate-300">{gameState.settings.jumpIn ? 'Enabled' : 'Off'}</span>
+              )}
+            </div>
+
+            {/* 7-0 Rule */}
+            <div className="flex items-center justify-between bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-300 font-medium">7-0 Rule (Swap/Rotate):</span>
+              {isHost && onUpdateSettings ? (
+                <input
+                  type="checkbox"
+                  checked={gameState.settings.sevenZero}
+                  onChange={(e) => onUpdateSettings({ sevenZero: e.target.checked })}
+                  className="w-4 h-4 accent-amber-500 cursor-pointer"
+                />
+              ) : (
+                <span className="font-bold text-slate-300">{gameState.settings.sevenZero ? 'Enabled' : 'Off'}</span>
+              )}
+            </div>
           </div>
         </div>
 

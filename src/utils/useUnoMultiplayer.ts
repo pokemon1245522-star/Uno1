@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import mqtt, { MqttClient } from 'mqtt';
 import {
   Card,
   PlayableColor,
@@ -8,16 +7,12 @@ import {
   PublicGameState,
   ClientSyncState,
   ChatMessage,
-  GameActionLog,
   DEFAULT_RULES,
 } from '../../shared/types';
 import { createUnoDeck, shuffleDeck, isCardPlayable, calculateHandScore } from '../../shared/unoEngine';
 import { soundManager } from './audio';
 
-const BROKERS = [
-  'wss://broker.hivemq.com:8884/mqtt',
-  'wss://broker.emqx.io:8084/mqtt',
-];
+const PUB_BASE = 'https://ntfy.sh';
 
 export function useUnoMultiplayer() {
   const [syncState, setSyncState] = useState<ClientSyncState | null>(null);
@@ -36,11 +31,12 @@ export function useUnoMultiplayer() {
     return pid;
   });
 
-  const clientRef = useRef<MqttClient | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const currentRoomIdRef = useRef<string | null>(null);
   const isHostRef = useRef<boolean>(false);
+  const joinIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Host-authoritative in-memory state
+  // Host authoritative memory
   const hostGameStateRef = useRef<PublicGameState | null>(null);
   const hostHandsRef = useRef<Map<string, Card[]>>(new Map());
   const hostDeckRef = useRef<Card[]>([]);
@@ -61,51 +57,74 @@ export function useUnoMultiplayer() {
     return code;
   };
 
-  // Helper to publish MQTT messages
-  const publish = useCallback((topic: string, message: any) => {
-    if (clientRef.current && clientRef.current.connected) {
-      clientRef.current.publish(topic, JSON.stringify(message), { qos: 1 });
+  // Publish an event over HTTPS
+  const postEvent = useCallback(async (roomId: string, eventObj: any) => {
+    try {
+      await fetch(`${PUB_BASE}/unolive_v3_${roomId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(eventObj),
+      });
+    } catch (e) {
+      console.warn('Network post error:', e);
     }
   }, []);
 
-  // Host broadcast full sync state
+  // Host broadcasts state to all players
   const hostBroadcastSync = useCallback(() => {
     const state = hostGameStateRef.current;
     if (!state) return;
 
-    // Send targeted sync to each player
-    for (const player of state.players) {
-      const pHand = hostHandsRef.current.get(player.id) || [];
-      const isTurn = state.currentTurnPlayerId === player.id && state.status === 'playing';
-      const playableCardIds = isTurn
-        ? pHand
-            .filter((c) => isCardPlayable(c, state.topCard, state.currentColor, state.pendingDrawCount, state.settings))
-            .map((c) => c.id)
-        : [];
-
-      const catchTarget = state.players.find(
-        (p) => p.id !== player.id && p.cardCount === 1 && p.mustCallUno && !p.calledUno
-      );
-
-      const clientSync: ClientSyncState = {
-        gameState: state,
-        myHand: pHand,
-        myPlayerId: player.id,
-        canDraw: Boolean(isTurn && !state.pendingColorChoice && (state.pendingDrawCount > 0 || !hasDrawnThisTurnRef.current || state.settings.drawUntilPlayable)),
-        canPass: Boolean(isTurn && !state.pendingColorChoice && state.pendingDrawCount === 0 && hasDrawnThisTurnRef.current),
-        canCallUno: Boolean(player.cardCount <= 2 && !player.calledUno),
-        canCatchUnoTargetId: catchTarget ? catchTarget.id : null,
-        playableCardIds,
-      };
-
-      if (player.id === myPlayerId) {
-        setSyncState(clientSync);
-      }
-
-      // Publish targeted state for guest
-      publish(`unolive/v1/rooms/${state.roomId}/sync/${player.id}`, clientSync);
+    // Collect all hands to package for each player
+    const handsObj: Record<string, Card[]> = {};
+    for (const [pid, h] of hostHandsRef.current.entries()) {
+      handsObj[pid] = h;
     }
-  }, [myPlayerId, publish]);
+
+    const payload = {
+      type: 'SYNC_BROADCAST',
+      gameState: state,
+      hands: handsObj,
+      timestamp: Date.now(),
+    };
+
+    // Update host's own syncState locally immediately
+    const myHand = hostHandsRef.current.get(myPlayerId) || [];
+    const isTurn = state.currentTurnPlayerId === myPlayerId && state.status === 'playing';
+    const playableCardIds = isTurn
+      ? myHand
+          .filter((c) => isCardPlayable(c, state.topCard, state.currentColor, state.pendingDrawCount, state.settings))
+          .map((c) => c.id)
+      : [];
+
+    const hostPlayer = state.players.find((p) => p.id === myPlayerId);
+    const catchTarget = state.players.find(
+      (p) => p.id !== myPlayerId && p.cardCount === 1 && p.mustCallUno && !p.calledUno
+    );
+
+    setSyncState({
+      gameState: state,
+      myHand,
+      myPlayerId,
+      canDraw: Boolean(
+        isTurn &&
+          !state.pendingColorChoice &&
+          (state.pendingDrawCount > 0 || !hasDrawnThisTurnRef.current || state.settings.drawUntilPlayable)
+      ),
+      canPass: Boolean(
+        isTurn &&
+          !state.pendingColorChoice &&
+          state.pendingDrawCount === 0 &&
+          hasDrawnThisTurnRef.current
+      ),
+      canCallUno: Boolean(hostPlayer && hostPlayer.cardCount <= 2 && !hostPlayer.calledUno),
+      canCatchUnoTargetId: catchTarget ? catchTarget.id : null,
+      playableCardIds,
+    });
+
+    // Broadcast to guests
+    postEvent(state.roomId, payload);
+  }, [myPlayerId, postEvent]);
 
   // Host turn timer
   useEffect(() => {
@@ -129,7 +148,6 @@ export function useUnoMultiplayer() {
     const curPlayer = state.players.find((p) => p.id === state.currentTurnPlayerId);
     if (!curPlayer) return;
 
-    // Auto draw card if needed
     if (hostDeckRef.current.length > 0) {
       const drawn = hostDeckRef.current.pop()!;
       const curHand = hostHandsRef.current.get(curPlayer.id) || [];
@@ -137,7 +155,6 @@ export function useUnoMultiplayer() {
       curPlayer.cardCount = curHand.length;
     }
 
-    // Advance turn
     const active = state.players.filter((p) => !p.isSpectator);
     const curIdx = active.findIndex((p) => p.id === curPlayer.id);
     let nextIdx = curIdx + state.direction;
@@ -145,7 +162,8 @@ export function useUnoMultiplayer() {
     const nextPlayer = active[nextIdx % active.length];
 
     state.currentTurnPlayerId = nextPlayer.id;
-    state.turnExpiresAt = state.settings.turnTimerSeconds > 0 ? Date.now() + state.settings.turnTimerSeconds * 1000 : null;
+    state.turnExpiresAt =
+      state.settings.turnTimerSeconds > 0 ? Date.now() + state.settings.turnTimerSeconds * 1000 : null;
     state.lastAction = {
       id: `act_${Date.now()}`,
       type: 'TIMEOUT',
@@ -159,104 +177,115 @@ export function useUnoMultiplayer() {
     hostBroadcastSync();
   };
 
-  // Connect to MQTT Broker
-  const connectBroker = useCallback((roomId: string, brokerIndex = 0) => {
-    if (clientRef.current) {
-      clientRef.current.end(true);
-      clientRef.current = null;
-    }
+  // Setup EventSource listener
+  const listenToRoom = useCallback(
+    (roomId: string) => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
 
-    const brokerUrl = BROKERS[brokerIndex % BROKERS.length];
-    const clientId = `uno_${myPlayerId}_${Math.random().toString(36).substring(2, 6)}`;
+      const url = `${PUB_BASE}/unolive_v3_${roomId}/sse`;
+      const es = new EventSource(url);
+      eventSourceRef.current = es;
 
-    const client = mqtt.connect(brokerUrl, {
-      clientId,
-      clean: true,
-      connectTimeout: 5000,
-      reconnectPeriod: 2500,
-    });
+      es.onopen = () => {
+        setIsConnected(true);
+        setErrorMessage(null);
+      };
 
-    clientRef.current = client;
+      es.onmessage = (event) => {
+        try {
+          const envelope = JSON.parse(event.data);
+          if (!envelope.message) return;
+          const msg = JSON.parse(envelope.message);
 
-    client.on('connect', () => {
-      setIsConnected(true);
-      setErrorMessage(null);
+          // 1. Guest receives SYNC_BROADCAST from Host
+          if (msg.type === 'SYNC_BROADCAST') {
+            const guestHand = msg.hands[myPlayerId] || [];
+            const state: PublicGameState = msg.gameState;
 
-      // Subscribe to room topics
-      client.subscribe(`unolive/v1/rooms/${roomId}/#`, (err) => {
-        if (!err && !isHostRef.current) {
-          // If guest, request to join
-          const myName = localStorage.getItem('uno_player_name') || 'Player';
-          const myAvatar = localStorage.getItem('uno_avatar') || '🦊';
-          publish(`unolive/v1/rooms/${roomId}/client_action`, {
-            type: 'JOIN',
-            payload: { playerId: myPlayerId, name: myName, avatar: myAvatar },
-          });
-        }
-      });
-    });
+            // Stop join retry interval if running
+            if (joinIntervalRef.current) {
+              clearInterval(joinIntervalRef.current);
+              joinIntervalRef.current = null;
+            }
 
-    client.on('message', (topic: string, messageBuffer: Buffer) => {
-      try {
-        const payload = JSON.parse(messageBuffer.toString());
+            const isTurn = state.currentTurnPlayerId === myPlayerId && state.status === 'playing';
+            const playableCardIds = isTurn
+              ? guestHand
+                  .filter((c: Card) =>
+                    isCardPlayable(c, state.topCard, state.currentColor, state.pendingDrawCount, state.settings)
+                  )
+                  .map((c: Card) => c.id)
+              : [];
 
-        // 1. Guest receiving targeted sync state from Host
-        if (topic === `unolive/v1/rooms/${roomId}/sync/${myPlayerId}`) {
-          const s = payload as ClientSyncState;
+            const pObj = state.players.find((p) => p.id === myPlayerId);
+            const catchTarget = state.players.find(
+              (p) => p.id !== myPlayerId && p.cardCount === 1 && p.mustCallUno && !p.calledUno
+            );
 
-          // Sound triggers
-          if (s.gameState.lastAction) {
-            if (s.gameState.lastAction.type === 'UNO_CALLED') soundManager.playUnoFanfare();
-            else if (s.gameState.lastAction.type === 'CARD_PLAYED') soundManager.playCardSnap();
-            else if (s.gameState.lastAction.type === 'DRAW_CARD') soundManager.playCardDraw();
-            else if (s.gameState.lastAction.type === 'ROUND_WON') soundManager.playWin();
-            showToast(s.gameState.lastAction.message);
+            // Audio cues
+            if (state.lastAction) {
+              if (state.lastAction.type === 'UNO_CALLED') soundManager.playUnoFanfare();
+              else if (state.lastAction.type === 'CARD_PLAYED') soundManager.playCardSnap();
+              else if (state.lastAction.type === 'DRAW_CARD') soundManager.playCardDraw();
+              else if (state.lastAction.type === 'ROUND_WON') soundManager.playWin();
+              showToast(state.lastAction.message);
+            }
+
+            if (state.currentTurnPlayerId === myPlayerId) {
+              soundManager.playTurnDing();
+            }
+
+            setSyncState({
+              gameState: state,
+              myHand: guestHand,
+              myPlayerId,
+              canDraw: isTurn && !state.pendingColorChoice,
+              canPass: isTurn && !state.pendingColorChoice && state.pendingDrawCount === 0,
+              canCallUno: Boolean(pObj && pObj.cardCount <= 2 && !pObj.calledUno),
+              canCatchUnoTargetId: catchTarget ? catchTarget.id : null,
+              playableCardIds,
+            });
           }
 
-          if (s.gameState.currentTurnPlayerId === myPlayerId) {
-            soundManager.playTurnDing();
+          // 2. Chat messages
+          if (msg.type === 'CHAT') {
+            setChatMessages((prev) => [...prev.slice(-49), msg.payload]);
           }
 
-          setSyncState(s);
+          // 3. Host receives guest action
+          if (isHostRef.current && msg.type === 'CLIENT_ACTION') {
+            handleHostIncomingAction(msg.action);
+          }
+        } catch (err) {
+          // ignore non-JSON or heartbeat
         }
+      };
 
-        // 2. Chat broadcast
-        if (topic === `unolive/v1/rooms/${roomId}/chat`) {
-          setChatMessages((prev) => [...prev.slice(-49), payload]);
-        }
+      es.onerror = () => {
+        setIsConnected(false);
+      };
+    },
+    [myPlayerId, showToast]
+  );
 
-        // 3. Host handling incoming actions from guests
-        if (isHostRef.current && topic === `unolive/v1/rooms/${roomId}/client_action`) {
-          handleHostAction(payload);
-        }
-      } catch (e) {
-        console.error('MQTT message error:', e);
-      }
-    });
-
-    client.on('error', (err) => {
-      console.warn('MQTT connection error:', err);
-      // Try next broker
-      if (brokerIndex < BROKERS.length - 1) {
-        connectBroker(roomId, brokerIndex + 1);
-      }
-    });
-
-    client.on('offline', () => {
-      setIsConnected(false);
-    });
-  }, [myPlayerId, publish, showToast]);
-
-  // Host Action Processor
-  const handleHostAction = (action: any) => {
+  // Host processes actions
+  const handleHostIncomingAction = (action: any) => {
     const state = hostGameStateRef.current;
     if (!state) return;
 
     switch (action.type) {
       case 'JOIN': {
         const { playerId, name, avatar } = action.payload;
-        if (state.players.some((p) => p.id === playerId)) {
-          // Already in room, re-sync
+
+        // Check if already in room
+        const existing = state.players.find((p) => p.id === playerId);
+        if (existing) {
+          existing.isConnected = true;
+          existing.name = name;
+          existing.avatar = avatar;
           hostBroadcastSync();
           return;
         }
@@ -293,15 +322,16 @@ export function useUnoMultiplayer() {
         };
 
         hostBroadcastSync();
-
-        // Broadcast chat
-        publish(`unolive/v1/rooms/${state.roomId}/chat`, {
-          id: `msg_${Date.now()}`,
-          senderId: 'system',
-          senderName: 'System',
-          text: `${newPlayer.name} joined the room!`,
-          isSystem: true,
-          timestamp: Date.now(),
+        postEvent(state.roomId, {
+          type: 'CHAT',
+          payload: {
+            id: `msg_${Date.now()}`,
+            senderId: 'system',
+            senderName: 'System',
+            text: `${newPlayer.name} joined the room!`,
+            isSystem: true,
+            timestamp: Date.now(),
+          },
         });
         break;
       }
@@ -345,15 +375,9 @@ export function useUnoMultiplayer() {
         executeHostCatchUno(callerId, targetPlayerId);
         break;
       }
-
-      case 'CHAT': {
-        publish(`unolive/v1/rooms/${state.roomId}/chat`, action.payload);
-        break;
-      }
     }
   };
 
-  // Host Card Play Engine
   const executeHostPlayCard = (playerId: string, cardId: string, chosenColor?: PlayableColor) => {
     const state = hostGameStateRef.current;
     if (!state || state.status !== 'playing') return;
@@ -373,7 +397,6 @@ export function useUnoMultiplayer() {
       player.mustCallUno = hand.length === 1 && !player.calledUno;
     }
 
-    // Win Check
     if (hand.length === 0) {
       let roundScore = 0;
       const revealed: Record<string, Card[]> = {};
@@ -433,7 +456,8 @@ export function useUnoMultiplayer() {
     const nextPlayer = active[nextIdx % active.length];
 
     state.currentTurnPlayerId = nextPlayer.id;
-    state.turnExpiresAt = state.settings.turnTimerSeconds > 0 ? Date.now() + state.settings.turnTimerSeconds * 1000 : null;
+    state.turnExpiresAt =
+      state.settings.turnTimerSeconds > 0 ? Date.now() + state.settings.turnTimerSeconds * 1000 : null;
     state.discardCount = hostDiscardRef.current.length;
 
     state.lastAction = {
@@ -452,7 +476,6 @@ export function useUnoMultiplayer() {
     hostBroadcastSync();
   };
 
-  // Host Draw Card Engine
   const executeHostDrawCard = (playerId: string) => {
     const state = hostGameStateRef.current;
     if (!state || state.status !== 'playing') return;
@@ -505,7 +528,6 @@ export function useUnoMultiplayer() {
     hostBroadcastSync();
   };
 
-  // Host Pass Turn Engine
   const executeHostPassTurn = (playerId: string) => {
     const state = hostGameStateRef.current;
     if (!state || state.status !== 'playing') return;
@@ -518,7 +540,8 @@ export function useUnoMultiplayer() {
 
     const player = state.players.find((p) => p.id === playerId);
     state.currentTurnPlayerId = nextPlayer.id;
-    state.turnExpiresAt = state.settings.turnTimerSeconds > 0 ? Date.now() + state.settings.turnTimerSeconds * 1000 : null;
+    state.turnExpiresAt =
+      state.settings.turnTimerSeconds > 0 ? Date.now() + state.settings.turnTimerSeconds * 1000 : null;
     state.lastAction = {
       id: `act_${Date.now()}`,
       type: 'PASS',
@@ -532,7 +555,6 @@ export function useUnoMultiplayer() {
     hostBroadcastSync();
   };
 
-  // Host Call UNO Engine
   const executeHostCallUno = (playerId: string) => {
     const state = hostGameStateRef.current;
     if (!state) return;
@@ -552,7 +574,6 @@ export function useUnoMultiplayer() {
     hostBroadcastSync();
   };
 
-  // Host Catch UNO Engine
   const executeHostCatchUno = (callerId: string, targetId: string) => {
     const state = hostGameStateRef.current;
     if (!state) return;
@@ -582,7 +603,7 @@ export function useUnoMultiplayer() {
     hostBroadcastSync();
   };
 
-  // CREATE ROOM: Instantly generates room code and opens lobby
+  // CREATE ROOM: Generates room code and opens lobby immediately
   const createRoom = useCallback(
     (playerName: string, avatar: string, settings?: Partial<GameRules>) => {
       setErrorMessage(null);
@@ -637,7 +658,7 @@ export function useUnoMultiplayer() {
       hostGameStateRef.current = initialRoom;
       hostHandsRef.current.set(myPlayerId, []);
 
-      // Set sync state SYNCHRONOUSLY so the room code appears in 0 milliseconds!
+      // Instant transition
       setSyncState({
         gameState: initialRoom,
         myHand: [],
@@ -649,14 +670,22 @@ export function useUnoMultiplayer() {
         playableCardIds: [],
       });
 
-      // Connect to broker in background
-      connectBroker(roomId);
-      showToast(`Room ${roomId} created! Share with friends.`);
+      listenToRoom(roomId);
+
+      // Publish initial state
+      postEvent(roomId, {
+        type: 'SYNC_BROADCAST',
+        gameState: initialRoom,
+        hands: { [myPlayerId]: [] },
+        timestamp: Date.now(),
+      });
+
+      showToast(`Room ${roomId} created! Share code with friends.`);
     },
-    [myPlayerId, connectBroker, showToast]
+    [myPlayerId, listenToRoom, postEvent, showToast]
   );
 
-  // JOIN ROOM
+  // JOIN ROOM: Connects immediately and shows lobby while syncing with host
   const joinRoom = useCallback(
     (roomCode: string, playerName: string, avatar: string) => {
       setErrorMessage(null);
@@ -664,11 +693,90 @@ export function useUnoMultiplayer() {
       const code = roomCode.trim().toUpperCase();
       currentRoomIdRef.current = code;
 
-      // Show temporary loading lobby
+      const safeName = playerName.trim().slice(0, 16) || 'Player';
+      const safeAvatar = avatar || '🐱';
+
+      // Set interim lobby state immediately so guest enters lobby without delay
+      const interimRoom: PublicGameState = {
+        roomId: code,
+        hostId: 'connecting',
+        status: 'lobby',
+        settings: { ...DEFAULT_RULES },
+        players: [
+          {
+            id: myPlayerId,
+            name: safeName,
+            avatar: safeAvatar,
+            cardCount: 0,
+            score: 0,
+            roundScore: 0,
+            isConnected: true,
+            isReady: false,
+            isHost: false,
+            isSpectator: false,
+            calledUno: false,
+            mustCallUno: false,
+          },
+        ],
+        topCard: null,
+        currentColor: null,
+        currentTurnPlayerId: null,
+        direction: 1,
+        pendingDrawCount: 0,
+        pendingColorChoice: false,
+        pendingColorPlayerId: null,
+        roundNumber: 1,
+        winnerId: null,
+        roundWinnerId: null,
+        turnExpiresAt: null,
+        deckCount: 0,
+        discardCount: 0,
+        lastAction: {
+          id: `act_${Date.now()}`,
+          type: 'JOINING',
+          playerId: myPlayerId,
+          playerName: safeName,
+          message: `Connecting to room ${code}...`,
+          timestamp: Date.now(),
+        },
+      };
+
+      setSyncState({
+        gameState: interimRoom,
+        myHand: [],
+        myPlayerId,
+        canDraw: false,
+        canPass: false,
+        canCallUno: false,
+        canCatchUnoTargetId: null,
+        playableCardIds: [],
+      });
+
+      // Start listening to the room
+      listenToRoom(code);
+
+      // Ping join request immediately and retry every 1 second until synced
+      const sendJoinPing = () => {
+        postEvent(code, {
+          type: 'CLIENT_ACTION',
+          action: {
+            type: 'JOIN',
+            payload: {
+              playerId: myPlayerId,
+              name: safeName,
+              avatar: safeAvatar,
+            },
+          },
+        });
+      };
+
+      sendJoinPing();
+      if (joinIntervalRef.current) clearInterval(joinIntervalRef.current);
+      joinIntervalRef.current = setInterval(sendJoinPing, 1000);
+
       showToast(`Joining room ${code}...`);
-      connectBroker(code);
     },
-    [connectBroker, showToast]
+    [myPlayerId, listenToRoom, postEvent, showToast]
   );
 
   // START GAME (Host)
@@ -712,7 +820,8 @@ export function useUnoMultiplayer() {
     state.pendingDrawCount = top.value === 'draw2' ? 2 : 0;
     state.deckCount = deck.length;
     state.discardCount = 1;
-    state.turnExpiresAt = state.settings.turnTimerSeconds > 0 ? Date.now() + state.settings.turnTimerSeconds * 1000 : null;
+    state.turnExpiresAt =
+      state.settings.turnTimerSeconds > 0 ? Date.now() + state.settings.turnTimerSeconds * 1000 : null;
 
     state.lastAction = {
       id: `act_${Date.now()}`,
@@ -728,20 +837,23 @@ export function useUnoMultiplayer() {
     hostBroadcastSync();
   }, [hostBroadcastSync]);
 
-  // Client Play Card
+  // Client actions
   const playCard = useCallback(
     (cardId: string, chosenColor?: PlayableColor) => {
       if (isHostRef.current) {
         executeHostPlayCard(myPlayerId, cardId, chosenColor);
       } else if (currentRoomIdRef.current) {
-        publish(`unolive/v1/rooms/${currentRoomIdRef.current}/client_action`, {
-          type: 'PLAY_CARD',
-          payload: { playerId: myPlayerId, cardId, chosenColor },
+        postEvent(currentRoomIdRef.current, {
+          type: 'CLIENT_ACTION',
+          action: {
+            type: 'PLAY_CARD',
+            payload: { playerId: myPlayerId, cardId, chosenColor },
+          },
         });
       }
       setPendingWildCard(null);
     },
-    [myPlayerId, publish]
+    [myPlayerId, postEvent]
   );
 
   const chooseColor = useCallback(
@@ -757,47 +869,59 @@ export function useUnoMultiplayer() {
     if (isHostRef.current) {
       executeHostDrawCard(myPlayerId);
     } else if (currentRoomIdRef.current) {
-      publish(`unolive/v1/rooms/${currentRoomIdRef.current}/client_action`, {
-        type: 'DRAW_CARD',
-        payload: { playerId: myPlayerId },
+      postEvent(currentRoomIdRef.current, {
+        type: 'CLIENT_ACTION',
+        action: {
+          type: 'DRAW_CARD',
+          payload: { playerId: myPlayerId },
+        },
       });
     }
-  }, [myPlayerId, publish]);
+  }, [myPlayerId, postEvent]);
 
   const passTurn = useCallback(() => {
     if (isHostRef.current) {
       executeHostPassTurn(myPlayerId);
     } else if (currentRoomIdRef.current) {
-      publish(`unolive/v1/rooms/${currentRoomIdRef.current}/client_action`, {
-        type: 'PASS_TURN',
-        payload: { playerId: myPlayerId },
+      postEvent(currentRoomIdRef.current, {
+        type: 'CLIENT_ACTION',
+        action: {
+          type: 'PASS_TURN',
+          payload: { playerId: myPlayerId },
+        },
       });
     }
-  }, [myPlayerId, publish]);
+  }, [myPlayerId, postEvent]);
 
   const callUno = useCallback(() => {
     if (isHostRef.current) {
       executeHostCallUno(myPlayerId);
     } else if (currentRoomIdRef.current) {
-      publish(`unolive/v1/rooms/${currentRoomIdRef.current}/client_action`, {
-        type: 'CALL_UNO',
-        payload: { playerId: myPlayerId },
+      postEvent(currentRoomIdRef.current, {
+        type: 'CLIENT_ACTION',
+        action: {
+          type: 'CALL_UNO',
+          payload: { playerId: myPlayerId },
+        },
       });
     }
-  }, [myPlayerId, publish]);
+  }, [myPlayerId, postEvent]);
 
   const catchUno = useCallback(
     (targetPlayerId: string) => {
       if (isHostRef.current) {
         executeHostCatchUno(myPlayerId, targetPlayerId);
       } else if (currentRoomIdRef.current) {
-        publish(`unolive/v1/rooms/${currentRoomIdRef.current}/client_action`, {
-          type: 'CATCH_UNO',
-          payload: { callerId: myPlayerId, targetPlayerId },
+        postEvent(currentRoomIdRef.current, {
+          type: 'CLIENT_ACTION',
+          action: {
+            type: 'CATCH_UNO',
+            payload: { callerId: myPlayerId, targetPlayerId },
+          },
         });
       }
     },
-    [myPlayerId, publish]
+    [myPlayerId, postEvent]
   );
 
   const toggleReady = useCallback(() => {
@@ -809,13 +933,17 @@ export function useUnoMultiplayer() {
         hostBroadcastSync();
       }
     } else if (currentRoomIdRef.current) {
-      publish(`unolive/v1/rooms/${currentRoomIdRef.current}/client_action`, {
-        type: 'TOGGLE_READY',
-        payload: { playerId: myPlayerId },
+      postEvent(currentRoomIdRef.current, {
+        type: 'CLIENT_ACTION',
+        action: {
+          type: 'TOGGLE_READY',
+          payload: { playerId: myPlayerId },
+        },
       });
     }
-  }, [myPlayerId, hostBroadcastSync, publish]);
+  }, [myPlayerId, hostBroadcastSync, postEvent]);
 
+  // Host updates room settings (editable right in lobby)
   const updateSettings = useCallback(
     (settings: Partial<GameRules>) => {
       if (!isHostRef.current) return;
@@ -823,9 +951,10 @@ export function useUnoMultiplayer() {
       if (state) {
         state.settings = { ...state.settings, ...settings };
         hostBroadcastSync();
+        showToast('Room rules updated!');
       }
     },
-    [hostBroadcastSync]
+    [hostBroadcastSync, showToast]
   );
 
   const kickPlayer = useCallback(
@@ -851,9 +980,13 @@ export function useUnoMultiplayer() {
   }, [startGame]);
 
   const leaveRoom = useCallback(() => {
-    if (clientRef.current) {
-      clientRef.current.end(true);
-      clientRef.current = null;
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    if (joinIntervalRef.current) {
+      clearInterval(joinIntervalRef.current);
+      joinIntervalRef.current = null;
     }
     currentRoomIdRef.current = null;
     isHostRef.current = false;
@@ -876,9 +1009,12 @@ export function useUnoMultiplayer() {
       };
 
       setChatMessages((prev) => [...prev, msg]);
-      publish(`unolive/v1/rooms/${currentRoomIdRef.current}/chat`, msg);
+      postEvent(currentRoomIdRef.current, {
+        type: 'CHAT',
+        payload: msg,
+      });
     },
-    [myPlayerId, syncState, publish]
+    [myPlayerId, syncState, postEvent]
   );
 
   return {

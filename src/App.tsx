@@ -129,6 +129,7 @@ export default function App() {
           onKickPlayer={kickPlayer}
           onLeaveRoom={leaveRoom}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          onUpdateSettings={updateSettings}
         />
       ) : (
         <GameTable
