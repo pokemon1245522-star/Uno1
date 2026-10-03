@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'http';
 import path from 'path';
+import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import { RoomManager } from './server/roomManager.js';
@@ -14,6 +15,7 @@ async function startServer() {
   const port = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
+  app.use(cors({ origin: '*' }));
   app.use(express.json());
 
   // Health check endpoint

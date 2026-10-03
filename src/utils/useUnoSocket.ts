@@ -44,9 +44,19 @@ export function useUnoSocket() {
       return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws`;
+    let wsHost = window.location.host;
+    let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+    // If accessed from Vercel, Netlify, or external domain, connect to the Cloud Run server:
+    if (
+      window.location.hostname !== 'localhost' &&
+      !window.location.hostname.includes('run.app')
+    ) {
+      wsHost = 'ais-pre-rgujx5tkhz2nbhxu6qpfdr-868365446847.asia-southeast1.run.app';
+      wsProtocol = 'wss:';
+    }
+
+    const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 
     const ws = new WebSocket(wsUrl);
     socketRef.current = ws;
@@ -148,13 +158,30 @@ export function useUnoSocket() {
     };
   }, [connect]);
 
-  const send = useCallback((msg: ClientMessage) => {
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify(msg));
-    } else {
-      setErrorMessage('Connecting to game server...');
-    }
-  }, []);
+  const send = useCallback(
+    (msg: ClientMessage) => {
+      const ws = socketRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+      } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+        const onOpen = () => {
+          ws.send(JSON.stringify(msg));
+          ws.removeEventListener('open', onOpen);
+        };
+        ws.addEventListener('open', onOpen);
+      } else {
+        connect();
+        const checkInterval = setInterval(() => {
+          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            socketRef.current.send(JSON.stringify(msg));
+            clearInterval(checkInterval);
+          }
+        }, 100);
+        setTimeout(() => clearInterval(checkInterval), 4000);
+      }
+    },
+    [connect]
+  );
 
   const createRoom = useCallback(
     (playerName: string, avatar: string, settings?: Partial<GameRules>) => {
