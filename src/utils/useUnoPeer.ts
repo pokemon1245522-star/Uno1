@@ -195,67 +195,78 @@ export function useUnoPeer() {
     (playerName: string, avatar: string, settings?: Partial<GameRules>) => {
       setErrorMessage(null);
       isHostRef.current = true;
+      setIsConnected(true);
       const roomId = generateRoomCode();
       const peerId = `unogame-${roomId}`;
+
+      const hostPlayer: PublicPlayer = {
+        id: myPlayerId,
+        name: playerName.trim().slice(0, 16) || 'Host',
+        avatar: avatar || '🦊',
+        cardCount: 0,
+        score: 0,
+        roundScore: 0,
+        isConnected: true,
+        isReady: true,
+        isHost: true,
+        isSpectator: false,
+        calledUno: false,
+        mustCallUno: false,
+      };
+
+      const initialRoom: PublicGameState = {
+        roomId,
+        hostId: myPlayerId,
+        status: 'lobby',
+        settings: { ...DEFAULT_RULES, ...settings },
+        players: [hostPlayer],
+        topCard: null,
+        currentColor: null,
+        currentTurnPlayerId: null,
+        direction: 1,
+        pendingDrawCount: 0,
+        pendingColorChoice: false,
+        pendingColorPlayerId: null,
+        roundNumber: 1,
+        winnerId: null,
+        roundWinnerId: null,
+        turnExpiresAt: null,
+        deckCount: 0,
+        discardCount: 0,
+        lastAction: {
+          id: `act_${Date.now()}`,
+          type: 'ROOM_CREATED',
+          playerId: myPlayerId,
+          playerName: hostPlayer.name,
+          message: `Room ${roomId} created! Share this code with friends.`,
+          timestamp: Date.now(),
+        },
+      };
+
+      // Set synchronous state so room code appears in 0 milliseconds
+      internalGameStateRef.current = initialRoom;
+      playerHandsRef.current.set(myPlayerId, []);
+      syncAll();
+      showToast(`Room ${roomId} created! Share code with friends.`);
 
       try {
         if (peerRef.current) peerRef.current.destroy();
 
         const peer = new Peer(peerId, {
           debug: 1,
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:stun1.l.google.com:19302' },
+              { urls: 'stun:stun2.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' },
+            ],
+          },
         });
         peerRef.current = peer;
 
         peer.on('open', () => {
           setIsConnected(true);
-          const hostPlayer: PublicPlayer = {
-            id: myPlayerId,
-            name: playerName.trim().slice(0, 16) || 'Host',
-            avatar: avatar || '🦊',
-            cardCount: 0,
-            score: 0,
-            roundScore: 0,
-            isConnected: true,
-            isReady: true,
-            isHost: true,
-            isSpectator: false,
-            calledUno: false,
-            mustCallUno: false,
-          };
-
-          const initialRoom: PublicGameState = {
-            roomId,
-            hostId: myPlayerId,
-            status: 'lobby',
-            settings: { ...DEFAULT_RULES, ...settings },
-            players: [hostPlayer],
-            topCard: null,
-            currentColor: null,
-            currentTurnPlayerId: null,
-            direction: 1,
-            pendingDrawCount: 0,
-            pendingColorChoice: false,
-            pendingColorPlayerId: null,
-            roundNumber: 1,
-            winnerId: null,
-            roundWinnerId: null,
-            turnExpiresAt: null,
-            deckCount: 0,
-            discardCount: 0,
-            lastAction: {
-              id: `act_${Date.now()}`,
-              type: 'ROOM_CREATED',
-              playerId: myPlayerId,
-              playerName: hostPlayer.name,
-              message: `Room ${roomId} created! Share this code with friends.`,
-              timestamp: Date.now(),
-            },
-          };
-
-          internalGameStateRef.current = initialRoom;
-          playerHandsRef.current.set(myPlayerId, []);
-          syncAll();
-          showToast(`Room ${roomId} created!`);
         });
 
         // Guest connects
@@ -645,14 +656,82 @@ export function useUnoPeer() {
     (roomCode: string, playerName: string, avatar: string) => {
       setErrorMessage(null);
       isHostRef.current = false;
+      setIsConnected(true);
       const code = roomCode.trim().toUpperCase();
       const hostPeerId = `unogame-${code}`;
+
+      const safeName = playerName.trim().slice(0, 16) || 'Player';
+      const safeAvatar = avatar || '🐱';
+
+      // Set interim lobby immediately so guest transitions to lobby without waiting
+      const interimRoom: PublicGameState = {
+        roomId: code,
+        hostId: 'connecting',
+        status: 'lobby',
+        settings: { ...DEFAULT_RULES },
+        players: [
+          {
+            id: myPlayerId,
+            name: safeName,
+            avatar: safeAvatar,
+            cardCount: 0,
+            score: 0,
+            roundScore: 0,
+            isConnected: true,
+            isReady: false,
+            isHost: false,
+            isSpectator: false,
+            calledUno: false,
+            mustCallUno: false,
+          },
+        ],
+        topCard: null,
+        currentColor: null,
+        currentTurnPlayerId: null,
+        direction: 1,
+        pendingDrawCount: 0,
+        pendingColorChoice: false,
+        pendingColorPlayerId: null,
+        roundNumber: 1,
+        winnerId: null,
+        roundWinnerId: null,
+        turnExpiresAt: null,
+        deckCount: 0,
+        discardCount: 0,
+        lastAction: {
+          id: `act_${Date.now()}`,
+          type: 'JOINING',
+          playerId: myPlayerId,
+          playerName: safeName,
+          message: `Connecting to room ${code}...`,
+          timestamp: Date.now(),
+        },
+      };
+
+      setSyncState({
+        gameState: interimRoom,
+        myHand: [],
+        myPlayerId,
+        canDraw: false,
+        canPass: false,
+        canCallUno: false,
+        canCatchUnoTargetId: null,
+        playableCardIds: [],
+      });
 
       try {
         if (peerRef.current) peerRef.current.destroy();
 
         const peer = new Peer({
           debug: 1,
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:stun1.l.google.com:19302' },
+              { urls: 'stun:stun2.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' },
+            ],
+          },
         });
         peerRef.current = peer;
 
@@ -666,8 +745,8 @@ export function useUnoPeer() {
               type: 'JOIN',
               payload: {
                 playerId: myPlayerId,
-                name: playerName,
-                avatar,
+                name: safeName,
+                avatar: safeAvatar,
               },
             });
             showToast(`Connected to room ${code}!`);

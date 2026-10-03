@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useUnoSocket } from './utils/useUnoSocket';
+import { useUnoPeer } from './utils/useUnoPeer';
 import { MainMenu } from './components/MainMenu';
 import { Lobby } from './components/Lobby';
 import { GameTable } from './components/GameTable';
@@ -52,7 +52,7 @@ export default function App() {
     catchUno,
     playAgain,
     sendChat,
-  } = useUnoSocket();
+  } = useUnoPeer();
 
   // Save profile changes to localStorage
   useEffect(() => {
