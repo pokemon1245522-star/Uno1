@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useUnoFirebase } from './utils/useUnoFirebase';
+import { useUnoMultiplayer } from './utils/useUnoMultiplayer';
 import { MainMenu } from './components/MainMenu';
 import { Lobby } from './components/Lobby';
 import { GameTable } from './components/GameTable';
@@ -52,7 +52,7 @@ export default function App() {
     catchUno,
     playAgain,
     sendChat,
-  } = useUnoFirebase();
+  } = useUnoMultiplayer();
 
   // Save profile changes to localStorage
   useEffect(() => {

@@ -83,7 +83,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
 
         {/* Error message banner */}
         {errorMessage && (
-          <div className="w-full mb-4 p-3 bg-red-950/70 border border-red-500/60 rounded-2xl text-red-200 text-xs text-center font-medium shadow-lg animate-in fade-in">
+          <div className="w-full mb-4 p-3 bg-red-950/80 border border-red-500/80 rounded-2xl text-red-200 text-xs text-center font-medium shadow-lg animate-in fade-in">
             {errorMessage}
           </div>
         )}
@@ -138,7 +138,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <button
               onClick={() => {
                 soundManager.playClick();
-                setMode('create');
+                onCreateRoom(customRules);
               }}
               disabled={isLoading || !playerName.trim()}
               className="w-full py-4 px-6 bg-gradient-to-r from-red-600 via-amber-500 to-emerald-500 hover:opacity-95 disabled:opacity-50 text-slate-950 font-black text-base rounded-2xl shadow-xl shadow-amber-500/20 flex items-center justify-between transition cursor-pointer font-['Outfit'] tracking-wide"

@@ -28,6 +28,15 @@ import {
 import { createUnoDeck, shuffleDeck, isCardPlayable, calculateHandScore } from '../../shared/unoEngine';
 import { soundManager } from './audio';
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs = 5000, errorMsg = 'Firebase connection timed out'): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+    ),
+  ]);
+}
+
 export function useUnoFirebase() {
   const [syncState, setSyncState] = useState<ClientSyncState | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -338,25 +347,37 @@ export function useUnoFirebase() {
         },
       };
 
-      await setDoc(doc(db, 'rooms', roomId), initialRoom);
-      await setDoc(doc(db, 'rooms', roomId, 'hands', hostId), { cards: [] });
-      await addDoc(collection(db, 'rooms', roomId, 'messages'), {
+      await withTimeout(setDoc(doc(db, 'rooms', roomId), initialRoom), 5000, 'Firestore request timed out. Make sure Cloud Firestore is enabled in your Firebase console.');
+      await withTimeout(setDoc(doc(db, 'rooms', roomId, 'hands', hostId), { cards: [] }), 5000);
+      await withTimeout(addDoc(collection(db, 'rooms', roomId, 'messages'), {
         senderId: 'system',
         senderName: 'System',
         text: `Room ${roomId} created! Share the code to invite friends.`,
         isSystem: true,
         timestamp: Date.now(),
-      });
+      }), 5000);
 
       setCurrentRoomId(roomId);
       localStorage.setItem('uno_room_id', roomId);
     } catch (err: any) {
       console.error('Failed to create room:', err);
-      setErrorMessage(
-        err.message?.includes('permission-denied')
-          ? 'Firestore permission denied. Please allow read/write in your Firestore rules at console.firebase.google.com'
-          : `Failed to create room: ${err.message}`
-      );
+      const isApiDisabled =
+        err.message?.includes('Cloud Firestore API') ||
+        err.message?.includes('not been used') ||
+        err.message?.includes('is disabled') ||
+        err.message?.includes('timed out');
+
+      if (isApiDisabled) {
+        setErrorMessage(
+          'Cloud Firestore is not activated yet in Firebase project "uno1-d9f32". Visit https://console.firebase.google.com/project/uno1-d9f32/firestore and click "Create database", or switch to Instant P2P mode.'
+        );
+      } else if (err.message?.includes('permission-denied')) {
+        setErrorMessage(
+          'Firestore permission denied. Please allow read/write in your Firestore rules at console.firebase.google.com/project/uno1-d9f32/firestore/rules'
+        );
+      } else {
+        setErrorMessage(`Failed to create room: ${err.message}`);
+      }
     }
   };
 
