@@ -1,0 +1,24 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // UNO Game Rooms
+    match /rooms/{roomId} {
+      allow read, write: if true;
+
+      // Player private card hands
+      match /hands/{playerId} {
+        allow read, write: if true;
+      }
+
+      // Shared draw deck and discard pile
+      match /deck/{docId} {
+        allow read, write: if true;
+      }
+
+      // Room live chat and system notifications
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}

@@ -41,41 +41,47 @@ A full-stack, real-time multiplayer UNO card game built for the web. Playable ac
 
 ## 🛠️ Tech Stack & Architecture
 
-- **Backend**: Node.js, Express, `ws` (native WebSocket protocol)
-- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Lucide Icons, Canvas Confetti
-- **Audio**: Web Audio API (zero external asset loading lag)
-- **State Model**: Server-authoritative state machine with delta events and strict card ownership isolation.
+## 🛠️ Firebase Real-Time Architecture
 
-```
-Client A (Phone) ──┐
-                   ├─► WebSocket (ws://host/ws) ──► Node.js / Express Server
-Client B (PC)    ──┘                                 └─► Server-Authoritative UNO Engine
+The application now uses **Google Firebase Firestore** (`uno1-d9f32`) for real-time multiplayer state synchronization. This means:
+- **No dedicated WebSocket server container needed**: Works seamlessly on Vercel, Netlify, Firebase Hosting, GitHub Pages, or any static host!
+- **Real-time document listeners (`onSnapshot`)**: Synchronizes turns, card plays, deck counts, and chat across devices in real time.
+- **Cross-device**: Multiple players join the same 6-character room code on different devices (phones, tablets, PCs).
+
+### Firebase Security Rules
+In your [Firebase Console](https://console.firebase.google.com/project/uno1-d9f32/firestore/rules), ensure your Firestore Rules allow the game rooms to read and write:
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{roomId} {
+      allow read, write: if true;
+
+      match /hands/{playerId} {
+        allow read, write: if true;
+      }
+
+      match /deck/{docId} {
+        allow read, write: if true;
+      }
+
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}
 ```
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Deployment (Vercel, Netlify, Firebase)
 
-### Prerequisites
-- Node.js 18+
-- npm 9+
-
-### 1. Installation
-```bash
-npm install
-```
-
-### 2. Run Development Server
-```bash
-npm run dev
-```
-The application will start on `http://localhost:3000`.
-
-### 3. Build & Run for Production
-```bash
-npm run build
-npm start
-```
+1. Connect your repository to Vercel (or run `vercel`).
+2. Build Command: `npm run build`
+3. Output Directory: `dist`
+4. The multiplayer game will connect directly to your Firebase project `uno1-d9f32` with zero server configuration!
 
 ---
 
